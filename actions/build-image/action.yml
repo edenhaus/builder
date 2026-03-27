@@ -66,10 +66,12 @@ inputs:
     default: ""
   image:
     description: Full image name without tag (e.g., "ghcr.io/home-assistant/amd64-base")
-    required: true
+    required: false
+    default: ""
   image-tags:
     description: Image tags, one per line
-    required: true
+    required: false
+    default: ""
   labels:
     description: Additional OCI labels (key=value format, one per line)
     required: false
@@ -82,9 +84,14 @@ inputs:
     description: Whether to push images to registry
     required: false
     default: "false"
+  target:
+    description: Target build stage in a multistage Dockerfile
+    required: false
+    default: ""
   version:
     description: Image version label
-    required: true
+    required: false
+    default: ""
 
 outputs:
   digest:
@@ -94,6 +101,44 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        IMAGE: ${{ inputs.image }}
+        IMAGE_TAGS: ${{ inputs.image-tags }}
+        VERSION: ${{ inputs.version }}
+        LOAD: ${{ inputs.load }}
+        PUSH: ${{ inputs.push }}
+        COSIGN: ${{ inputs.cosign }}
+      run: |
+        if [[ -z "${TARGET}" ]]; then
+          errors=()
+          [[ -z "${IMAGE}" ]] && errors+=("image")
+          [[ -z "${IMAGE_TAGS}" ]] && errors+=("image-tags")
+          [[ -z "${VERSION}" ]] && errors+=("version")
+          if [[ ${#errors[@]} -gt 0 ]]; then
+            echo "::error::Missing required inputs: ${errors[*]}. These are required when 'target' is not set."
+            exit 1
+          fi
+        else
+          if [[ "${LOAD}" != "true" ]]; then
+            echo "::error::Input 'load' must be enabled when building a target stage, otherwise the build result is discarded."
+            exit 1
+          fi
+        fi
+
+        if [[ -z "${IMAGE}" ]]; then
+          if [[ "${PUSH}" == "true" ]]; then
+            echo "::error::Input 'image' is required when 'push' is enabled."
+            exit 1
+          fi
+          if [[ "${COSIGN}" == "true" ]]; then
+            echo "::error::Input 'image' is required when 'cosign' is enabled."
+            exit 1
+          fi
+        fi
+
     - name: Login to container registry
       if: inputs.push == 'true'
       uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
@@ -154,9 +199,11 @@ runs:
         CONTEXT: ${{ inputs.context }}
       run: |
         tags=()
-        while IFS= read -r tag; do
-          [[ -n "$tag" ]] && tags+=("${IMAGE}:${tag}")
-        done <<< "${IMAGE_TAGS}"
+        if [[ -n "${IMAGE}" ]] && [[ -n "${IMAGE_TAGS}" ]]; then
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] && tags+=("${IMAGE}:${tag}")
+          done <<< "${IMAGE_TAGS}"
+        fi
 
         {
           echo "tags<<EOF"
@@ -168,7 +215,7 @@ runs:
 
         build_args=()
         build_args+=("BUILD_ARCH=${ARCH}")
-        build_args+=("BUILD_VERSION=${VERSION}")
+        [[ -n "${VERSION}" ]] && build_args+=("BUILD_VERSION=${VERSION}")
         while IFS= read -r line; do
           [[ -n "$line" ]] && build_args+=("$line")
         done <<< "${BUILD_ARGS_INPUT}"
@@ -180,10 +227,12 @@ runs:
 
         labels=()
         labels+=("io.hass.arch=${ARCH}")
-        labels+=("io.hass.version=${VERSION}")
         labels+=("org.opencontainers.image.created=${build_date}")
         labels+=("org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}")
-        labels+=("org.opencontainers.image.version=${VERSION}")
+        if [[ -n "${VERSION}" ]]; then
+          labels+=("io.hass.version=${VERSION}")
+          labels+=("org.opencontainers.image.version=${VERSION}")
+        fi
         while IFS= read -r line; do
           [[ -n "$line" ]] && labels+=("$line")
         done <<< "${LABELS_INPUT}"
@@ -242,6 +291,7 @@ runs:
       with:
         context: ${{ env.CONTEXT }} # zizmor: ignore[template-injection]
         file: ${{ steps.options.outputs.file }}
+        target: ${{ inputs.target }}
         pull: true
         push: ${{ inputs.push == 'true' }}
         load: ${{ inputs.load == 'true' }}
