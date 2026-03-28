@@ -5,10 +5,6 @@ inputs:
   arch:
     description: Architecture to build (e.g., "amd64")
     required: true
-  setup-buildx:
-    description: Whether to set up Docker Buildx (set to "false" to skip when a builder is already configured)
-    required: false
-    default: "true"
   build-args:
     description: Additional build arguments (key=value format, one per line)
     required: false
@@ -25,13 +21,13 @@ inputs:
     description: Tag of the image containing BuildKit inline cache metadata
     required: false
     default: "latest"
-  container-registry-password:
-    description: Password for container registry (use secrets.GITHUB_TOKEN for GHCR)
-    required: true
   container-registry:
     description: Container registry (e.g., "ghcr.io")
     required: false
     default: "ghcr.io"
+  container-registry-password:
+    description: Password for container registry (use secrets.GITHUB_TOKEN for GHCR)
+    required: true
   container-registry-username:
     description: Username for container registry (defaults to repository owner)
     required: false
@@ -88,6 +84,10 @@ inputs:
     description: Whether to push images to registry
     required: false
     default: "false"
+  setup-buildx:
+    description: Whether to set up Docker Buildx (set to "false" to skip when a builder is already configured)
+    required: false
+    default: "true"
   target:
     description: Target build stage in a multistage Dockerfile
     required: false
